@@ -1,0 +1,152 @@
+name: 'Get CODEOWNER reviewers'
+description: 'Gets the CODEOWNER reviewers for changed files in a PR and posts them as a comment'
+
+inputs:
+  custom_message:
+    description: 'Optional custom message to include in the comment'
+    required: false
+    default: ''
+  codeowners_path:
+    description: 'Path to the CODEOWNERS file'
+    required: false
+    default: '.github/CODEOWNERS'
+  security_reviewers:
+    description: 'Comma-separated list of security reviewers to include'
+    required: false
+    default: ''
+
+outputs:
+  reviewers:
+    description: 'List of reviewers found for the changed files'
+    value: ${{ steps.get-reviewers.outputs.reviewers }}
+
+runs:
+  steps:
+    - name: Get CODEOWNERS reviewers
+      id: get-reviewers
+      uses: actions/github-script@v7
+      with:
+        script: |
+          // Get changed files in the PR
+          const { data: changedFiles } = await github.rest.pulls.listFiles({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            pull_number: context.issue.number
+          });
+          
+          // Get CODEOWNERS file
+          const { data: codeowners } = await github.rest.repos.getContent({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            path: process.env.CODEOWNERS_PATH
+          });
+          
+          const codeownersContent = Buffer.from(codeowners.content, 'base64').toString();
+          const reviewers = new Set();
+          
+          // Parse CODEOWNERS file and create path patterns
+          const codeownerRules = [];
+          codeownersContent.split('\n').forEach(line => {
+            if (line && !line.startsWith('#')) {
+              const [pattern, ...owners] = line.trim().split(/\s+/);
+              if (pattern && owners.length > 0) {
+                codeownerRules.push({
+                  pattern: pattern,
+                  owners: owners.filter(owner => owner.startsWith('@'))
+                });
+              }
+            }
+          });
+          
+          // Sort rules by specificity (most specific first)
+          codeownerRules.sort((a, b) => {
+            const aDepth = a.pattern.split('/').length;
+            const bDepth = b.pattern.split('/').length;
+            return bDepth - aDepth;
+          });
+          
+          // For each changed file, find matching CODEOWNERS rules
+          changedFiles.forEach(file => {
+            const filePath = file.filename;
+            for (const rule of codeownerRules) {
+              // Convert glob pattern to regex
+              const pattern = rule.pattern
+                .replace(/\*/g, '.*')
+                // Convert single character wildcard ? to match any single character
+                .replace(/\?/g, '.')
+                // Preserve opening square bracket for character sets
+                .replace(/\[/g, '[')
+                // Preserve closing square bracket for character sets
+                .replace(/\]/g, ']');
+              const regex = new RegExp(`^${pattern}$`);
+              
+              if (regex.test(filePath)) {
+                rule.owners.forEach(owner => reviewers.add(owner));
+                break; // Stop at first match (most specific rule)
+              }
+            }
+          });
+          
+          // Format the message
+          const customMessage = process.env.CUSTOM_MESSAGE || '';
+          const securityReviewers = process.env.SECURITY_REVIEWERS ? process.env.SECURITY_REVIEWERS.split(',').map(r => r.trim()) : [];
+          
+          // Separate regular reviewers from security reviewers
+          const regularReviewers = new Set(Array.from(reviewers).filter(reviewer => !securityReviewers.includes(reviewer)));
+          const codeownerSecurityReviewers = new Set(Array.from(reviewers).filter(reviewer => securityReviewers.includes(reviewer)));
+          
+          let message = `## 👥 Required Reviewers\n\n`;
+          
+          if (regularReviewers.size > 0) {
+            message += `### Reviewers for this PR:\n\n`;
+            message += Array.from(regularReviewers).map(reviewer => `- ${reviewer}`).join('\n');
+            message += '\n\n';
+            message += `> 💡 These reviewers were automatically assigned based on the files changed in this PR.\n`;
+          } else if (codeownerSecurityReviewers.size === 0) {
+            message += `> ⚠️ No CODEOWNERS found for the changed files in this PR.\n`;
+            message += `> Please ensure you have a CODEOWNERS file set up in your repository.\n\n`;
+          }
+          
+          if (codeownerSecurityReviewers.size > 0 || securityReviewers.length > 0) {
+            message += `\n## 🔒 Security Approval Required\n\n`;
+            message += `### Security Reviewers:\n\n`;
+            
+            // Add security reviewers from CODEOWNERS
+            if (codeownerSecurityReviewers.size > 0) {
+              message += `#### From CODEOWNERS:\n\n`;
+              message += Array.from(codeownerSecurityReviewers).map(reviewer => `- ${reviewer}`).join('\n');
+              message += '\n\n';
+            }
+            
+            // Add additional security reviewers
+            const additionalSecurityReviewers = securityReviewers.filter(reviewer => !codeownerSecurityReviewers.has(reviewer));
+            if (additionalSecurityReviewers.length > 0) {
+              message += `#### Additional Security Reviewers:\n\n`;
+              message += additionalSecurityReviewers.map(reviewer => `- ${reviewer}`).join('\n');
+              message += '\n\n';
+            }
+            
+            message += `> ⚡ Security review is required for this PR. Please ensure all security reviewers approve the changes.\n\n`;
+          }
+          
+          if (customMessage) {
+            message += `\n### ℹ️ Info\n\n${customMessage}\n\n`;
+          }
+          
+          message += `\n---\n`;
+          message += `*This comment was automatically generated by the CODEOWNERS Reviewers action*`;
+          
+          // Add comment to PR
+          await github.rest.issues.createComment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+            body: message
+          });
+          
+          // Set output
+          core.setOutput('reviewers', Array.from(reviewers).join(','));
+        env:
+          CUSTOM_MESSAGE: ${{ inputs.custom_message }}
+          CODEOWNERS_PATH: ${{ inputs.codeowners_path }}
+          SECURITY_REVIEWERS: ${{ inputs.security_reviewers }} 
