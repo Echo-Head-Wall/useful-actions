@@ -1,6 +1,9 @@
 name: 'Get CODEOWNER reviewers'
 description: 'Gets the CODEOWNER reviewers for changed files in a PR and posts them as a comment'
-
+env:
+    CUSTOM_MESSAGE: ${{ inputs.custom_message }}
+    CODEOWNERS_PATH: ${{ inputs.codeowners_path }}
+    SECURITY_REVIEWERS: ${{ inputs.security_reviewers }}
 inputs:
   custom_message:
     description: 'Optional custom message to include in the comment'
@@ -147,7 +150,3 @@ runs:
           
           // Set output
           core.setOutput('reviewers', Array.from(reviewers).join(','));
-      env:
-        CUSTOM_MESSAGE: ${{ inputs.custom_message }}
-        CODEOWNERS_PATH: ${{ inputs.codeowners_path }}
-        SECURITY_REVIEWERS: ${{ inputs.security_reviewers }}
