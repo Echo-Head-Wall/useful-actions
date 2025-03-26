@@ -12,7 +12,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Get CODEOWNERS reviewers
-        uses: Echo-Head-Wall/useful-actions/codeowner-reviewers-action@3eb9868b6456ef475d198911687c1c72a138b59c
+        uses: Echo-Head-Wall/useful-actions/codeowner-reviewers-action@4cbf9bdcedc1372d1d63bd40ac811c3bbfa23130
         with:
           custom_message: "Please review these changes as soon as possible."
           codeowners_path: ".github/CODEOWNERS"  
