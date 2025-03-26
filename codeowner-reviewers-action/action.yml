@@ -34,10 +34,11 @@ runs:
           });
           
           // Get CODEOWNERS file
+          const codeownersPath = core.getInput('codeowners_path');
           const { data: codeowners } = await github.rest.repos.getContent({
             owner: context.repo.owner,
             repo: context.repo.repo,
-            path: process.env.CODEOWNERS_PATH
+            path: codeownersPath
           });
           
           const codeownersContent = Buffer.from(codeowners.content, 'base64').toString();
@@ -87,8 +88,8 @@ runs:
           });
           
           // Format the message
-          const customMessage = process.env.CUSTOM_MESSAGE || '';
-          const securityReviewers = process.env.SECURITY_REVIEWERS ? process.env.SECURITY_REVIEWERS.split(',').map(r => r.trim()) : [];
+          const customMessage = core.getInput('custom_message');
+          const securityReviewers = core.getInput('security_reviewers') ? core.getInput('security_reviewers').split(',').map(r => r.trim()) : [];
           
           // Separate regular reviewers from security reviewers
           const regularReviewers = new Set(Array.from(reviewers).filter(reviewer => !securityReviewers.includes(reviewer)));
