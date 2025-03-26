@@ -21,6 +21,7 @@ outputs:
     value: ${{ steps.get-reviewers.outputs.reviewers }}
 
 runs:
+  using: "composite"
   steps:
     - name: Get CODEOWNERS reviewers
       id: get-reviewers
