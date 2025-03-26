@@ -149,4 +149,4 @@ runs:
         env:
           CUSTOM_MESSAGE: ${{ inputs.custom_message }}
           CODEOWNERS_PATH: ${{ inputs.codeowners_path }}
-          SECURITY_REVIEWERS: ${{ inputs.security_reviewers }} 
+          SECURITY_REVIEWERS: ${{ inputs.security_reviewers }}
