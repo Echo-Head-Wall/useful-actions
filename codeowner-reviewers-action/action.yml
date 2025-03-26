@@ -147,7 +147,7 @@ runs:
           
           // Set output
           core.setOutput('reviewers', Array.from(reviewers).join(','));
-        env:
-          CUSTOM_MESSAGE: ${{ inputs.custom_message }}
-          CODEOWNERS_PATH: ${{ inputs.codeowners_path }}
-          SECURITY_REVIEWERS: ${{ inputs.security_reviewers }}
+      env:
+        CUSTOM_MESSAGE: ${{ inputs.custom_message }}
+        CODEOWNERS_PATH: ${{ inputs.codeowners_path }}
+        SECURITY_REVIEWERS: ${{ inputs.security_reviewers }}
