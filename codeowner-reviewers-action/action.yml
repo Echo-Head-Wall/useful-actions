@@ -1,6 +1,18 @@
 name: 'Get CODEOWNER reviewers'
 description: 'Gets the CODEOWNER reviewers for changed files in a PR and posts them as a comment'
-
+inputs:
+  custom_message:
+    description: 'Optional custom message to include in the comment'
+    required: false
+    default: ''
+  codeowners_path:
+    description: 'Path to the CODEOWNERS file'
+    required: false
+    default: '.github/CODEOWNERS'
+  security_reviewers:
+    description: 'Comma-separated list of security reviewers to include'
+    required: false
+    default: ''
 outputs:
   reviewers:
     description: 'List of reviewers found for the changed files'
