@@ -3,7 +3,12 @@ description: 'Gets the CODEOWNER reviewers for changed files in a PR and posts t
 permissions:
   contents: read
   pull-requests: write
+  issues: write
 inputs:
+  github_token:
+    description: 'GitHub token with required permissions'
+    required: true
+    default: ${{ github.token }}
   custom_message:
     description: 'Optional custom message to include in the comment'
     required: false
@@ -24,16 +29,29 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Debug workspace
+      shell: bash
+      run: |
+        echo "Workspace directory:"
+        ls -la
+        echo ""
+        echo "GitHub directory:"
+        ls -la .github || echo ".github not found"
+        echo ""
+        echo "CODEOWNERS file:"
+        cat .github/CODEOWNERS || echo "CODEOWNERS not found in .github"
+        
     - name: Get CODEOWNERS reviewers
       id: get-reviewers
       uses: actions/github-script@v7
       with:
-        github-token: ${{ github.token }}
+        github-token: ${{ inputs.github_token }}
         script: |
           const fs = require('fs');
           const path = require('path');
 
           // Get changed files in the PR
+          console.log('Getting changed files in PR...');
           const { data: changedFiles } = await github.rest.pulls.listFiles({
             owner: context.repo.owner,
             repo: context.repo.repo,
@@ -42,76 +60,67 @@ runs:
           
           console.log(`Found ${changedFiles.length} changed files in PR #${context.issue.number}`);
           
-          // Determine CODEOWNERS file path
-          let codeownersPath = core.getInput('codeowners_path');
-          
-          // If path is empty, use default
-          if (!codeownersPath || codeownersPath.trim() === '') {
-            codeownersPath = '.github/CODEOWNERS';
-          }
-          
-          console.log(`Looking for CODEOWNERS file at: ${codeownersPath}`);
-          
           // Read CODEOWNERS file directly from filesystem
           let codeownersContent = '';
+          let codeownersPath = '';
           
-          try {
-            // Check if file exists at specified path
-            if (fs.existsSync(codeownersPath)) {
-              console.log(`Found CODEOWNERS file at: ${codeownersPath}`);
-              codeownersContent = fs.readFileSync(codeownersPath, 'utf8');
-              console.log(`Read ${codeownersContent.length} bytes from CODEOWNERS file`);
-            } else {
-              // Try common locations
-              console.log(`File not found at ${codeownersPath}, trying alternate locations...`);
-              const commonLocations = [
-                '.github/CODEOWNERS',
-                'CODEOWNERS',
-                'docs/CODEOWNERS',
-                '.gitlab/CODEOWNERS'
-              ];
-              
-              let found = false;
-              for (const location of commonLocations) {
-                if (location === codeownersPath) continue; // Skip the path we already tried
-                
-                console.log(`Checking ${location}...`);
-                if (fs.existsSync(location)) {
-                  console.log(`Found CODEOWNERS at: ${location}`);
-                  codeownersContent = fs.readFileSync(location, 'utf8');
-                  console.log(`Read ${codeownersContent.length} bytes from CODEOWNERS file`);
-                  found = true;
-                  break;
-                }
-              }
-              
-              if (!found) {
-                throw new Error(`CODEOWNERS file not found at ${codeownersPath} or any common locations`);
-              }
-            }
-            
-            if (!codeownersContent || codeownersContent.trim() === '') {
-              throw new Error(`CODEOWNERS file is empty`);
-            }
-          } catch (error) {
-            console.error(`Error reading CODEOWNERS file: ${error.message}`);
+          console.log('Looking for CODEOWNERS file...');
+          
+          // Try common locations directly
+          const possiblePaths = [
+            '.github/CODEOWNERS',
+            'CODEOWNERS',
+            'docs/CODEOWNERS',
+            '.gitlab/CODEOWNERS'
+          ];
+          
+          // First check if the input path exists
+          const inputPath = core.getInput('codeowners_path');
+          if (inputPath && inputPath.trim() !== '') {
+            possiblePaths.unshift(inputPath);
+          }
+          
+          // Try each path
+          let found = false;
+          for (const pathToTry of possiblePaths) {
+            console.log(`Checking for CODEOWNERS at: ${pathToTry}`);
             try {
+              if (fs.existsSync(pathToTry)) {
+                console.log(`Found CODEOWNERS at: ${pathToTry}`);
+                codeownersContent = fs.readFileSync(pathToTry, 'utf8');
+                codeownersPath = pathToTry;
+                found = true;
+                break;
+              }
+            } catch (e) {
+              console.log(`Error checking ${pathToTry}: ${e.message}`);
+            }
+          }
+          
+          if (!found) {
+            const errorMsg = 'CODEOWNERS file not found in any standard location';
+            console.error(errorMsg);
+            
+            try {
+              console.log('Attempting to post comment about missing CODEOWNERS file...');
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: context.issue.number,
-                body: `## ⚠️ CODEOWNERS Error\n\nCould not process CODEOWNERS file: ${error.message}\n\nPlease check the GitHub Actions logs for more details.`
+                body: `## ⚠️ CODEOWNERS Error\n\n${errorMsg}\n\nPlease check the GitHub Actions logs for more details.`
               });
             } catch (commentError) {
               console.error(`Failed to post comment: ${commentError.message}`);
+              console.error(`Error details: ${JSON.stringify(commentError, null, 2)}`);
             }
             
-            core.setFailed(`Failed to process CODEOWNERS file: ${error.message}`);
+            core.setFailed(errorMsg);
             core.setOutput('reviewers', '');
             return;
           }
           
-          console.log('Successfully read CODEOWNERS file');
+          console.log(`Successfully read CODEOWNERS file from ${codeownersPath}`);
+          console.log(`File size: ${codeownersContent.length} bytes`);
           
           // Parse CODEOWNERS file and create path patterns
           const reviewers = new Set();
@@ -128,6 +137,8 @@ runs:
               }
             }
           });
+          
+          console.log(`Parsed ${codeownerRules.length} rules from CODEOWNERS file`);
           
           // Sort rules by specificity (most specific first)
           codeownerRules.sort((a, b) => {
@@ -157,6 +168,8 @@ runs:
               }
             }
           });
+          
+          console.log(`Found ${reviewers.size} reviewers for the changed files`);
           
           // Format the message
           const customMessage = core.getInput('custom_message');
@@ -209,7 +222,7 @@ runs:
           
           // Post comment
           try {
-            console.log('Posting comment to PR');
+            console.log('Posting comment to PR...');
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -219,6 +232,8 @@ runs:
             console.log('Successfully posted comment');
           } catch (commentError) {
             console.error(`Error posting comment: ${commentError.message}`);
+            console.error(`Error status: ${commentError.status}`);
+            console.error(`Error details: ${JSON.stringify(commentError, null, 2)}`);
             core.setFailed(`Failed to post comment: ${commentError.message}`);
           }
           
