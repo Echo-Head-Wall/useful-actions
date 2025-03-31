@@ -114,7 +114,8 @@ If you're fixing something, just make sure to:
 
 ## 📜 License
 
-MIT License - basically, do whatever you want with it! Just don't sue me if something breaks 😅
+The Unlicense - basically, do whatever you want with it! Just don't sue me if something breaks 😅.
+Read the license file for greater detail.
 
 ---
 
