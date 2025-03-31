@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Do The Thing
-        uses: Echo-Head-Wall/useful-actions/codeowner-reviewers-action@3eb9868b6456ef475d198911687c1c72a138b59c
+        uses: Echo-Head-Wall/useful-actions/codeowner-reviewers-action@v1
         with:
           # Add a friendly message if you want!
           custom_message: "Hi friends! Would love your eyes on this when you have a sec"
