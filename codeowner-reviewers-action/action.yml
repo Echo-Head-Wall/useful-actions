@@ -35,13 +35,70 @@ runs:
           
           // Get CODEOWNERS file
           const codeownersPath = core.getInput('codeowners_path');
-          const { data: codeowners } = await github.rest.repos.getContent({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            path: codeownersPath
-          });
+          let codeownersContent = '';
           
-          const codeownersContent = Buffer.from(codeowners.content, 'base64').toString();
+          try {
+            console.log(`Attempting to retrieve CODEOWNERS file from path: ${codeownersPath}`);
+            
+            // First try to list files in the .github directory to see if CODEOWNERS exists
+            try {
+              const { data: dirContents } = await github.rest.repos.getContent({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                path: '.github'
+              });
+              console.log(`Contents of .github directory:`, dirContents.map(item => item.name));
+            } catch (dirError) {
+              console.log(`Could not list .github directory: ${dirError.message}`);
+            }
+            
+            // Now try to get the actual CODEOWNERS file
+            const { data: codeowners } = await github.rest.repos.getContent({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              path: codeownersPath
+            });
+            
+            if (!codeowners) {
+              throw new Error('GitHub API returned empty response for CODEOWNERS file');
+            }
+            
+            if (!codeowners.content) {
+              throw new Error(`CODEOWNERS file found but has no content property. Response: ${JSON.stringify(codeowners)}`);
+            }
+            
+            console.log(`Successfully retrieved CODEOWNERS file. Type: ${typeof codeowners.content}, Length: ${codeowners.content.length}`);
+            codeownersContent = Buffer.from(codeowners.content, 'base64').toString();
+            console.log(`CODEOWNERS content first 100 chars: ${codeownersContent.substring(0, 100)}`);
+          } catch (error) {
+            console.log(`Error retrieving CODEOWNERS file: ${error.message}`);
+            console.log(`Error details: ${JSON.stringify(error)}`);
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `## ⚠️ CODEOWNERS Error\n\nThere was an error processing the CODEOWNERS file at \`${codeownersPath}\`.\n\nError: \`${error.message}\`\n\nPlease check the GitHub Actions logs for more details.`
+            });
+            
+            core.setFailed(`Failed to process CODEOWNERS file: ${error.message}`);
+            core.setOutput('reviewers', '');
+            return;
+          }
+          
+          // Only proceed if we have content
+          if (!codeownersContent || codeownersContent.trim() === '') {
+            console.log('CODEOWNERS file is empty. Exiting.');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `## ⚠️ CODEOWNERS Warning\n\nThe CODEOWNERS file at \`${codeownersPath}\` exists but is empty.`
+            });
+            core.setOutput('reviewers', '');
+            return;
+          }
+          
           const reviewers = new Set();
           
           // Parse CODEOWNERS file and create path patterns
