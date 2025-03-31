@@ -1,6 +1,6 @@
 # 🎯 CODEOWNER Reviewers Action
 
-Hey there! 👋 I made this GitHub Action because it was diffcult for people to find the right reviewers for PRs which was driving me insane. It automagically figures out who should review your PR based on your CODEOWNERS file and drops a customizible comment for you to add instructions on how to contact the reviewers! ✨
+Hey there! 👋 I made this GitHub Action because it was diffcult for people to find the right reviewers for PRs which was driving me insane. It automeowgically figures out who should review your PR based on your CODEOWNERS file and drops a customizible comment for you to add instructions on how to contact the reviewers! ✨
 
 ## ✨ What This Does
 
