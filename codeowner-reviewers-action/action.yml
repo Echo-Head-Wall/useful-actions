@@ -3,6 +3,7 @@ description: 'Gets the CODEOWNER reviewers for changed files in a PR and posts t
 permissions:
   contents: write
   issues: write
+  pull-requests: write
 inputs:
   custom_message:
     description: 'Optional custom message to include in the comment'
