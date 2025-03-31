@@ -1,9 +1,6 @@
 name: 'Get CODEOWNER reviewers'
 description: 'Gets the CODEOWNER reviewers for changed files in a PR and posts them as a comment'
-permissions:
-  contents: write
-  issues: write
-  pull-requests: write
+permissions: write-all
 inputs:
   custom_message:
     description: 'Optional custom message to include in the comment'
