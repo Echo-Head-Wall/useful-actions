@@ -42,239 +42,48 @@ runs:
           let codeownersContent = '';
           
           try {
-            console.log(`Attempting to retrieve CODEOWNERS file from path: ${codeownersPath}`);
+            console.log(`Attempting to read CODEOWNERS file from path: ${codeownersPath}`);
             
-            // First try to list files in the .github directory to see if CODEOWNERS exists
+            // Use Node.js fs module to read the file directly from the filesystem
+            const fs = require('fs');
+            const path = require('path');
+            
+            // Try to read the file from the specified path
             try {
-              const { data: dirContents } = await github.rest.repos.getContent({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                path: '.github'
-              });
-              console.log(`Contents of .github directory:`, dirContents.map(item => item.name));
-              
-              // If we found CODEOWNERS in the .github directory, use it directly
-              const codeownersInDir = dirContents.find(item => item.name === 'CODEOWNERS');
-              if (codeownersInDir) {
-                console.log('Found CODEOWNERS directly in .github directory, using it');
-                try {
-                  const { data: codeownersFile } = await github.rest.repos.getContent({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    path: codeownersInDir.path
-                  });
-                  
-                  if (codeownersFile && codeownersFile.content) {
-                    console.log(`Using CODEOWNERS from ${codeownersInDir.path}`);
-                    codeownersContent = Buffer.from(codeownersFile.content, 'base64').toString();
-                    // Continue with existing code using codeownersContent
-                    console.log(`CODEOWNERS content first 100 chars: ${codeownersContent.substring(0, 100)}`);
-                    
-                    // Skip the rest of the file fetching logic
-                    if (codeownersContent && codeownersContent.trim() !== '') {
-                      const reviewers = new Set();
-                      
-                      // Parse CODEOWNERS file and create path patterns
-                      const codeownerRules = [];
-                      codeownersContent.split('\n').forEach(line => {
-                        if (line && !line.startsWith('#')) {
-                          const [pattern, ...owners] = line.trim().split(/\s+/);
-                          if (pattern && owners.length > 0) {
-                            codeownerRules.push({
-                              pattern: pattern,
-                              owners: owners.filter(owner => owner.startsWith('@'))
-                            });
-                          }
-                        }
-                      });
-                      
-                      // Sort rules by specificity (most specific first)
-                      codeownerRules.sort((a, b) => {
-                        const aDepth = a.pattern.split('/').length;
-                        const bDepth = b.pattern.split('/').length;
-                        return bDepth - aDepth;
-                      });
-                      
-                      // For each changed file, find matching CODEOWNERS rules
-                      changedFiles.forEach(file => {
-                        const filePath = file.filename;
-                        for (const rule of codeownerRules) {
-                          // Convert glob pattern to regex
-                          const pattern = rule.pattern
-                            .replace(/\*/g, '.*')
-                            // Convert single character wildcard ? to match any single character
-                            .replace(/\?/g, '.')
-                            // Preserve opening square bracket for character sets
-                            .replace(/\[/g, '[')
-                            // Preserve closing square bracket for character sets
-                            .replace(/\]/g, ']');
-                          const regex = new RegExp(`^${pattern}$`);
-                          
-                          if (regex.test(filePath)) {
-                            rule.owners.forEach(owner => reviewers.add(owner));
-                            break; // Stop at first match (most specific rule)
-                          }
-                        }
-                      });
-                      
-                      // Format the message
-                      const customMessage = core.getInput('custom_message');
-                      const securityReviewers = core.getInput('security_reviewers') ? core.getInput('security_reviewers').split(',').map(r => r.trim()) : [];
-                      
-                      // Separate regular reviewers from security reviewers
-                      const regularReviewers = new Set(Array.from(reviewers).filter(reviewer => !securityReviewers.includes(reviewer)));
-                      const codeownerSecurityReviewers = new Set(Array.from(reviewers).filter(reviewer => securityReviewers.includes(reviewer)));
-                      
-                      let message = `## 👥 Required Reviewers\n\n`;
-                      
-                      if (regularReviewers.size > 0) {
-                        message += `### Reviewers for this PR:\n\n`;
-                        message += Array.from(regularReviewers).map(reviewer => `- ${reviewer}`).join('\n');
-                        message += '\n\n';
-                        message += `> 💡 These reviewers were automatically assigned based on the files changed in this PR.\n`;
-                      } else if (codeownerSecurityReviewers.size === 0) {
-                        message += `> ⚠️ No CODEOWNERS found for the changed files in this PR.\n`;
-                        message += `> Please ensure you have a CODEOWNERS file set up in your repository.\n\n`;
-                      }
-                      
-                      if (codeownerSecurityReviewers.size > 0 || securityReviewers.length > 0) {
-                        message += `\n## 🔒 Security Approval Required\n\n`;
-                        message += `### Security Reviewers:\n\n`;
-                        
-                        // Add security reviewers from CODEOWNERS
-                        if (codeownerSecurityReviewers.size > 0) {
-                          message += `#### From CODEOWNERS:\n\n`;
-                          message += Array.from(codeownerSecurityReviewers).map(reviewer => `- ${reviewer}`).join('\n');
-                          message += '\n\n';
-                        }
-                        
-                        // Add additional security reviewers
-                        const additionalSecurityReviewers = securityReviewers.filter(reviewer => !codeownerSecurityReviewers.has(reviewer));
-                        if (additionalSecurityReviewers.length > 0) {
-                          message += `#### Additional Security Reviewers:\n\n`;
-                          message += additionalSecurityReviewers.map(reviewer => `- ${reviewer}`).join('\n');
-                          message += '\n\n';
-                        }
-                        
-                        message += `> ⚡ Security review is required for this PR. Please ensure all security reviewers approve the changes.\n\n`;
-                      }
-                      
-                      if (customMessage) {
-                        message += `\n### ℹ️ Info\n\n${customMessage}\n\n`;
-                      }
-                      
-                      message += `\n---\n`;
-                      message += `*This comment was automatically generated by the CODEOWNERS Reviewers action*`;
-                      
-                      try {
-                        // Add comment to PR
-                        await github.rest.issues.createComment({
-                          owner: context.repo.owner,
-                          repo: context.repo.repo,
-                          issue_number: context.issue.number,
-                          body: message
-                        });
-                      } catch (commentError) {
-                        console.log(`Error posting comment: ${commentError.message}`);
-                        console.log(`Comment body: ${message}`);
-                        core.setFailed(`Failed to post comment: ${commentError.message}`);
-                      }
-                      
-                      // Set output
-                      core.setOutput('reviewers', Array.from(reviewers).join(','));
-                      return;
-                  }
-                } catch (directError) {
-                  console.log(`Error getting direct CODEOWNERS content: ${directError.message}`);
-                }
-              }
-            } catch (dirError) {
-              console.log(`Could not list .github directory: ${dirError.message}`);
-            }
-            
-            // Now try to get the actual CODEOWNERS file
-            console.log(`Fetching CODEOWNERS file from: ${codeownersPath}`);
-            
-            if (!codeownersPath) {
-              throw new Error('codeowners_path is empty or undefined');
-            }
-            
-            let codeowners;
-            try {
-              const { data } = await github.rest.repos.getContent({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                path: codeownersPath
-              });
-              codeowners = data;
-            } catch (error) {
-              console.log(`Failed to retrieve CODEOWNERS from ${codeownersPath}, trying alternate paths...`);
-              
-              // Try alternate common locations
-              const fallbackPaths = [
-                'CODEOWNERS',
-                '.github/CODEOWNERS',
-                'docs/CODEOWNERS',
-                '.gitlab/CODEOWNERS'
-              ];
-              
-              let foundFile = false;
-              for (const path of fallbackPaths) {
-                if (path === codeownersPath) continue; // Skip the path we already tried
-                
-                try {
-                  console.log(`Trying alternate path: ${path}`);
-                  const { data } = await github.rest.repos.getContent({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    path: path
-                  });
-                  codeowners = data;
-                  console.log(`Found CODEOWNERS at alternate path: ${path}`);
-                  foundFile = true;
-                  break;
-                } catch (fallbackError) {
-                  console.log(`No CODEOWNERS at ${path}: ${fallbackError.message}`);
-                }
-              }
-              
-              if (!foundFile) {
-                throw new Error(`CODEOWNERS file not found at ${codeownersPath} or any fallback locations`);
-              }
-            }
-            
-            // Add detailed logging of the API response
-            console.log('Codeowners API response type:', typeof codeowners);
-            console.log('Codeowners API response:', JSON.stringify(codeowners, null, 2));
-            
-            // Handle the case where the response is an array (directory listing)
-            if (Array.isArray(codeowners)) {
-              console.log('Received a directory listing instead of a file. Looking for CODEOWNERS file...');
-              const codeownersFile = codeowners.find(file => file.name.toUpperCase() === 'CODEOWNERS');
-              if (codeownersFile) {
-                console.log('Found CODEOWNERS file in directory listing:', codeownersFile.path);
-                // Fetch the actual file content
-                const { data: actualFile } = await github.rest.repos.getContent({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  path: codeownersFile.path
-                });
-                if (actualFile && actualFile.content) {
-                  codeownersContent = Buffer.from(actualFile.content, 'base64').toString();
-                } else {
-                  throw new Error('CODEOWNERS file found in directory but content could not be retrieved');
-                }
+              if (fs.existsSync(codeownersPath)) {
+                console.log(`Found CODEOWNERS file at: ${codeownersPath}`);
+                codeownersContent = fs.readFileSync(codeownersPath, 'utf8');
+                console.log(`CODEOWNERS content first 100 chars: ${codeownersContent.substring(0, 100)}`);
               } else {
-                throw new Error(`CODEOWNERS file not found in directory listing for ${codeownersPath}`);
+                console.log(`File not found at specified path: ${codeownersPath}, trying common locations...`);
+                
+                // Try common locations
+                const commonLocations = [
+                  '.github/CODEOWNERS',
+                  'CODEOWNERS',
+                  'docs/CODEOWNERS',
+                  '.gitlab/CODEOWNERS'
+                ];
+                
+                let found = false;
+                for (const location of commonLocations) {
+                  if (location === codeownersPath) continue; // Skip if we already tried this path
+                  
+                  if (fs.existsSync(location)) {
+                    console.log(`Found CODEOWNERS at alternate location: ${location}`);
+                    codeownersContent = fs.readFileSync(location, 'utf8');
+                    console.log(`CODEOWNERS content first 100 chars: ${codeownersContent.substring(0, 100)}`);
+                    found = true;
+                    break;
+                  }
+                }
+                
+                if (!found) {
+                  throw new Error(`CODEOWNERS file not found at ${codeownersPath} or any common locations`);
+                }
               }
-            } else if (!codeowners) {
-              throw new Error('GitHub API returned empty response for CODEOWNERS file');
-            } else if (!codeowners.content) {
-              throw new Error(`CODEOWNERS file found but has no content property. Response: ${JSON.stringify(codeowners)}`);
-            } else {
-              console.log(`Successfully retrieved CODEOWNERS file. Type: ${typeof codeowners.content}, Length: ${codeowners.content.length}`);
-              codeownersContent = Buffer.from(codeowners.content, 'base64').toString();
-              console.log(`CODEOWNERS content first 100 chars: ${codeownersContent.substring(0, 100)}`);
+            } catch (fsError) {
+              throw new Error(`Error reading CODEOWNERS file: ${fsError.message}`);
             }
           } catch (error) {
             console.log(`Error retrieving CODEOWNERS file: ${error.message}`);
