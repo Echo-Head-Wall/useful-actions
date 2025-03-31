@@ -60,23 +60,83 @@ runs:
               throw new Error('codeowners_path is empty or undefined');
             }
             
-            const { data: codeowners } = await github.rest.repos.getContent({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              path: codeownersPath
-            });
+            let codeowners;
+            try {
+              const { data } = await github.rest.repos.getContent({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                path: codeownersPath
+              });
+              codeowners = data;
+            } catch (error) {
+              console.log(`Failed to retrieve CODEOWNERS from ${codeownersPath}, trying alternate paths...`);
+              
+              // Try alternate common locations
+              const fallbackPaths = [
+                'CODEOWNERS',
+                '.github/CODEOWNERS',
+                'docs/CODEOWNERS',
+                '.gitlab/CODEOWNERS'
+              ];
+              
+              let foundFile = false;
+              for (const path of fallbackPaths) {
+                if (path === codeownersPath) continue; // Skip the path we already tried
+                
+                try {
+                  console.log(`Trying alternate path: ${path}`);
+                  const { data } = await github.rest.repos.getContent({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    path: path
+                  });
+                  codeowners = data;
+                  console.log(`Found CODEOWNERS at alternate path: ${path}`);
+                  foundFile = true;
+                  break;
+                } catch (fallbackError) {
+                  console.log(`No CODEOWNERS at ${path}: ${fallbackError.message}`);
+                }
+              }
+              
+              if (!foundFile) {
+                throw new Error(`CODEOWNERS file not found at ${codeownersPath} or any fallback locations`);
+              }
+            }
             
-            if (!codeowners) {
+            // Add detailed logging of the API response
+            console.log('Codeowners API response type:', typeof codeowners);
+            console.log('Codeowners API response:', JSON.stringify(codeowners, null, 2));
+            
+            // Handle the case where the response is an array (directory listing)
+            if (Array.isArray(codeowners)) {
+              console.log('Received a directory listing instead of a file. Looking for CODEOWNERS file...');
+              const codeownersFile = codeowners.find(file => file.name.toUpperCase() === 'CODEOWNERS');
+              if (codeownersFile) {
+                console.log('Found CODEOWNERS file in directory listing:', codeownersFile.path);
+                // Fetch the actual file content
+                const { data: actualFile } = await github.rest.repos.getContent({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  path: codeownersFile.path
+                });
+                if (actualFile && actualFile.content) {
+                  codeownersContent = Buffer.from(actualFile.content, 'base64').toString();
+                } else {
+                  throw new Error('CODEOWNERS file found in directory but content could not be retrieved');
+                }
+              } else {
+                throw new Error(`CODEOWNERS file not found in directory listing for ${codeownersPath}`);
+              }
+            } else if (!codeowners) {
               throw new Error('GitHub API returned empty response for CODEOWNERS file');
-            }
-            
-            if (!codeowners.content) {
+            } else if (!codeowners.content) {
               throw new Error(`CODEOWNERS file found but has no content property. Response: ${JSON.stringify(codeowners)}`);
+            } else {
+              console.log(`Successfully retrieved CODEOWNERS file. Type: ${typeof codeowners.content}, Length: ${codeowners.content.length}`);
+              codeownersContent = Buffer.from(codeowners.content, 'base64').toString();
+              console.log(`CODEOWNERS content first 100 chars: ${codeownersContent.substring(0, 100)}`);
             }
-            
-            console.log(`Successfully retrieved CODEOWNERS file. Type: ${typeof codeowners.content}, Length: ${codeowners.content.length}`);
-            codeownersContent = Buffer.from(codeowners.content, 'base64').toString();
-            console.log(`CODEOWNERS content first 100 chars: ${codeownersContent.substring(0, 100)}`);
           } catch (error) {
             console.log(`Error retrieving CODEOWNERS file: ${error.message}`);
             console.log(`Error details: ${JSON.stringify(error)}`);
